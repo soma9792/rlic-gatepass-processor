@@ -5,7 +5,7 @@ services:
     name: rlic-gatepass-processor
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: starter            # free plan has 512 MB RAM, too small for scanned PDFs
+    plan: free               # 512 MB RAM: text-layer PDFs only; scanned PDFs may run out of memory
     healthCheckPath: /healthz
     autoDeploy: true         # redeploys when you push to GitHub
     envVars:
