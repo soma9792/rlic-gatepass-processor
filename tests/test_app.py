@@ -217,11 +217,7 @@ def test_unsafe_filename_is_sanitised(client, tmp_path):
 
 def test_scanned_pdf_without_ocr_returns_503(client, tmp_path, monkeypatch):
     data = pdf_bytes(tmp_path, [[]])  # blank page, no text layer
-
-    def no_ocr(use_gpu=False):
-        raise OCRUnavailableError("EasyOCR is not installed")
-
-    monkeypatch.setattr(processor, "get_ocr_reader", no_ocr)
+    monkeypatch.setattr(processor, "OCR_ENGINE", "none")
 
     response = client.post(
         "/process",

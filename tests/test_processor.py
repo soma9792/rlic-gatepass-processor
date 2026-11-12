@@ -1,8 +1,10 @@
 import os
 import re
+import shutil
 import sys
 
 import pandas as pd
+import pymupdf
 import pytest
 
 import processor
@@ -26,7 +28,8 @@ class _EmptyReader:
 
 @pytest.fixture
 def no_ocr_text(monkeypatch):
-    """Use a fake OCR reader that returns no text, so blank pages stay blank."""
+    """Use a fake OCR engine that finds no text, so blank pages stay blank."""
+    monkeypatch.setattr(processor, "OCR_ENGINE", "easyocr")
     monkeypatch.setattr(processor, "get_ocr_reader", lambda use_gpu=False: _EmptyReader())
 
 
@@ -108,16 +111,62 @@ def test_page_without_text_is_reported_not_renamed(tmp_path, no_ocr_text):
     assert (pdf_dir / "blank.pdf").exists()
 
 
-def test_scanned_pdf_without_easyocr_raises_clear_error(tmp_path, monkeypatch):
+def test_scanned_pdf_with_ocr_turned_off_raises_clear_error(tmp_path, monkeypatch):
     pdf_dir = tmp_path / "pdfs"
     pdf_dir.mkdir()
     make_pdf(pdf_dir / "scan.pdf", [[]])
+    monkeypatch.setattr(processor, "OCR_ENGINE", "none")
+
+    with pytest.raises(OCRUnavailableError):
+        process_pdf_files(str(pdf_dir), str(tmp_path / "results"), ["scan.pdf"])
+
+
+def test_tesseract_missing_raises_clear_error(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    make_pdf(pdf_dir / "scan.pdf", [[]])
+    monkeypatch.setattr(processor, "OCR_ENGINE", "tesseract")
+    monkeypatch.setattr(processor.shutil, "which", lambda _name: None)
+
+    with pytest.raises(OCRUnavailableError):
+        process_pdf_files(str(pdf_dir), str(tmp_path / "results"), ["scan.pdf"])
+
+
+def test_easyocr_missing_raises_clear_error(tmp_path, monkeypatch):
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    make_pdf(pdf_dir / "scan.pdf", [[]])
+    monkeypatch.setattr(processor, "OCR_ENGINE", "easyocr")
     # Simulate "easyocr not installed" even if it happens to be present.
     monkeypatch.setitem(sys.modules, "easyocr", None)
     monkeypatch.setattr(processor, "_READER", None)
 
     with pytest.raises(OCRUnavailableError):
         process_pdf_files(str(pdf_dir), str(tmp_path / "results"), ["scan.pdf"])
+
+
+@pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract is not installed")
+def test_tesseract_reads_scanned_page_and_renames(tmp_path):
+    """Build an image-only PDF (no text layer), then check OCR finds the Staff No."""
+    text_pdf = make_pdf(tmp_path / "text.pdf", [gatepass_lines(staff_no="45678")])
+    src = pymupdf.open(str(text_pdf))
+    png = src[0].get_pixmap(dpi=200).tobytes("png")
+    src.close()
+
+    scan_doc = pymupdf.open()
+    page = scan_doc.new_page()
+    page.insert_image(page.rect, stream=png)
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    scan_doc.save(str(pdf_dir / "scan.pdf"))
+    scan_doc.close()
+
+    excel = process_pdf_files(str(pdf_dir), str(tmp_path / "results"), ["scan.pdf"])
+
+    df = pd.read_excel(excel, dtype=str)
+    assert df.loc[0, "Errors"] != "No text extracted"
+    assert df.loc[0, "Staff No."] == "45678"
+    assert (pdf_dir / "45678.pdf").exists()
 
 
 def test_staff_filename_stem_keeps_only_safe_characters():

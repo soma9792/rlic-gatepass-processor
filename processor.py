@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from datetime import datetime
 
 import numpy as np
@@ -19,8 +20,15 @@ import pymupdf as fitz  # PyMuPDF
 
 log = logging.getLogger("rlic.processor")
 
-# EasyOCR is heavy (pulls in PyTorch). It is imported lazily so that the app,
-# the tests and text-layer PDFs work without it. Scanned PDFs need it installed.
+# OCR engine for scanned PDFs (pages with no text layer):
+#   "tesseract" (default): the Tesseract program. Light on memory, fits free hosting.
+#   "easyocr":             EasyOCR + PyTorch. Needs about 1-2 GB RAM. Optional.
+#   "none":                turn OCR off; scanned PDFs get an error message.
+OCR_ENGINE = os.environ.get("RLIC_OCR_ENGINE", "tesseract").strip().lower()
+TESSERACT_LANG = os.environ.get("RLIC_TESSERACT_LANG", "eng")
+TESSERACT_TIMEOUT_SECONDS = 120
+
+# EasyOCR is imported lazily so the app and tests work without it.
 _READER = None
 
 COLUMNS_ORDER = [
@@ -34,6 +42,7 @@ class OCRUnavailableError(RuntimeError):
 
 
 def get_ocr_reader(use_gpu=False):
+    """EasyOCR reader (only used when RLIC_OCR_ENGINE=easyocr)."""
     global _READER
     if _READER is None:
         try:
@@ -53,11 +62,53 @@ def _pixmap_to_rgb_array(pix):
     return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, 3)
 
 
+def _ocr_page_tesseract(png_bytes):
+    """Run the Tesseract program on one PNG image and return its text."""
+    binary = shutil.which("tesseract")
+    if not binary:
+        raise OCRUnavailableError("Tesseract is not installed; scanned PDFs cannot be read.")
+    result = subprocess.run(
+        [binary, "stdin", "stdout", "-l", TESSERACT_LANG],
+        input=png_bytes,
+        capture_output=True,
+        timeout=TESSERACT_TIMEOUT_SECONDS,
+        check=False,
+    )
+    if result.returncode != 0:
+        # Do not log stderr: it can echo parts of the document.
+        raise RuntimeError(f"tesseract exited with code {result.returncode}")
+    return result.stdout.decode("utf-8", errors="replace")
+
+
+def _ocr_document(doc, use_gpu=False, dpi=300):
+    """OCR every page of an open PyMuPDF document with the configured engine."""
+    if OCR_ENGINE == "none":
+        raise OCRUnavailableError("OCR is turned off on this server; scanned PDFs cannot be read.")
+
+    if OCR_ENGINE == "easyocr":
+        reader = get_ocr_reader(use_gpu=use_gpu)
+        pages = []
+        for page in doc:
+            pix = page.get_pixmap(dpi=dpi)
+            results = reader.readtext(_pixmap_to_rgb_array(pix), detail=0, paragraph=True)
+            pages.append("\n".join(results))
+        return "\n".join(pages)
+
+    # Default: Tesseract. Render each page to PNG, then OCR it one page at a time
+    # so only one page image is in memory at once.
+    pages = []
+    for page in doc:
+        pix = page.get_pixmap(dpi=dpi)
+        pages.append(_ocr_page_tesseract(pix.tobytes("png")))
+        del pix
+    return "\n".join(pages)
+
+
 def extract_text_from_pdf(pdf_path, use_gpu=False, dpi=300):
-    """Extract text from the PDF text layer; fall back to EasyOCR when empty.
+    """Extract text from the PDF text layer; OCR pages that have none.
 
     Returns "" if the file cannot be opened or read.
-    Raises OCRUnavailableError if OCR is needed but EasyOCR is missing.
+    Raises OCRUnavailableError if OCR is needed but the engine is not available.
     """
     try:
         doc = fitz.open(pdf_path)
@@ -75,14 +126,8 @@ def extract_text_from_pdf(pdf_path, use_gpu=False, dpi=300):
         if text.strip():
             return text
 
-        # No text layer: treat as scanned and OCR every page.
-        reader = get_ocr_reader(use_gpu=use_gpu)
-        full_text = []
-        for page in doc:
-            pix = page.get_pixmap(dpi=dpi)
-            results = reader.readtext(_pixmap_to_rgb_array(pix), detail=0, paragraph=True)
-            full_text.append("\n".join(results))
-        return "\n".join(full_text)
+        # No text layer at all: treat as scanned and OCR every page.
+        return _ocr_document(doc, use_gpu=use_gpu, dpi=dpi)
     except OCRUnavailableError:
         raise
     except Exception as exc:

@@ -52,8 +52,8 @@ app.py              Flask app: upload checks, per-request temp folder, ZIP respo
 processor.py        Text extraction, field parsing, page split, rename, Excel export
 templates/index2.html   Upload page
 requirements.txt        Core dependencies (text-layer PDFs)
-requirements-ocr.txt    Optional OCR dependencies for scanned PDFs (large)
-Dockerfile              Production image (gunicorn, CPU PyTorch, EasyOCR models baked in)
+requirements-ocr.txt    Optional EasyOCR dependencies (large; not needed for Tesseract)
+Dockerfile              Production image (gunicorn + Tesseract OCR)
 tests/                  pytest suite; sample PDFs are generated during the tests
 ```
 
@@ -83,16 +83,21 @@ python app.py
 
 Open http://127.0.0.1:5000 in your browser.
 
-The core install handles PDFs with a text layer. To also handle **scanned**
-PDFs, install the OCR extras. This pulls in PyTorch (several hundred MB to
-over 1 GB depending on platform):
+Scanned PDFs (pages with no selectable text) are read with **Tesseract**. Install
+the Tesseract program on your computer, then make sure `tesseract` runs from a
+terminal:
 
-```bash
-pip install -r requirements-ocr.txt
-```
+- Windows: install from https://github.com/UB-Mannheim/tesseract/wiki and add
+  `C:\Program Files\Tesseract-OCR` to your PATH.
+- macOS: `brew install tesseract`
+- Linux: `sudo apt-get install tesseract-ocr tesseract-ocr-eng`
 
-The English OCR models (about 100 MB) download on the first scanned-PDF
-request, so that first request is slow.
+Text-layer PDFs work without Tesseract. Without it, scanned PDFs get a clear
+"cannot be read" message.
+
+Optional: EasyOCR is still supported for better accuracy on hard scans. It
+needs about 1–2 GB of RAM and PyTorch (`pip install -r requirements-ocr.txt`).
+Select it with `RLIC_OCR_ENGINE=easyocr`.
 
 To change the host or port for local runs:
 
@@ -131,10 +136,8 @@ docker run --rm -p 8000:8000 rlic-processor
 
 Open http://localhost:8000.
 
-Image size: roughly **1.5–2 GB**, mostly PyTorch (CPU build) and the OCR
-models (about 100 MB). The Dockerfile sets `EASYOCR_MODULE_PATH=/opt/easyocr` so
-the models are baked into the image and the first scanned PDF does not download
-them.
+Image size: about **300 MB**. The image includes the Tesseract program and English
+language data, so no model download happens at runtime.
 
 ## Deploy
 
@@ -144,16 +147,16 @@ in the `PORT` environment variable (default 8000).
 
 Resource guidance:
 
-- **Memory:** at least 2 GB RAM. Scanned PDFs load the OCR model (several
-  hundred MB in memory). Small free tiers (512 MB) will fail on scanned input.
-- **Request timeout:** set it to at least 15 minutes for large scanned batches.
-  The gunicorn timeout is already 900 s, but the platform's own proxy timeout
-  also applies. Some hosts cap this at 60 s or 300 s.
-- **Cold start:** the first request after a deploy or a scale-up loads the
-  model. Expect several seconds for text-layer PDFs and longer for the first
-  scanned PDF, since EasyOCR loads its models into memory on first use.
-- **Instances:** run **one** instance (or one worker). Each instance holds its
-  own copy of the OCR model, and batches are serialized inside an instance.
+- **Memory:** Tesseract works page by page and runs as a separate program, so the
+  free 512 MB plan on Render is enough. Each scanned page is rendered at 300 DPI
+  and then released. Very large batches of scans are slower but use the same memory.
+  If you switch to EasyOCR, you need 2 GB RAM or more.
+- **Request timeout:** scanned batches can take minutes. The gunicorn timeout
+  is 900 s, but the platform's proxy timeout also applies, and some hosts cap it
+  lower.
+- **Cold start:** free plans sleep when idle. The first visit after that can take
+  about a minute.
+- **Instances:** run **one** instance. Batches are serialized inside an instance.
 
 Environment variables you can set on the host:
 
@@ -175,8 +178,11 @@ Environment variables you can set on the host:
 
 ## Not verified yet
 
-- The EasyOCR path on real scanned PDFs was not run in the development
-  environment (EasyOCR and PyTorch were not installed there). The code path
-  is covered only by a test that simulates "OCR unavailable".
-- The Dockerfile has not been built in this environment (no Docker available).
-- The application has not been deployed to any hosting provider.
+- Tesseract was tested on a synthetic scanned page (one image, no text layer).
+  Accuracy on real gate-pass scans has not been checked. Test with real files
+  and compare the Staff No. column with the originals.
+- EasyOCR is not tested in the current setup.
+- The Dockerfile was not built in the development environment (no Docker).
+- The Render deployment was checked with a health request and the home page. A
+  scanned PDF on the free plan ran out of memory with EasyOCR. Re-test with
+  Tesseract.

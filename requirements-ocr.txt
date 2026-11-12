@@ -1,4 +1,3 @@
-# Optional OCR for scanned PDFs (no text layer). Large: pulls in PyTorch.
-# In Docker, PyTorch is installed as the CPU build first (see Dockerfile).
+# Optional EasyOCR engine (RLIC_OCR_ENGINE=easyocr). Large: pulls in PyTorch. Not needed for Tesseract.
 easyocr==1.7.2
 opencv-python-headless
