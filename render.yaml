@@ -1,0 +1,19 @@
+# Render Blueprint: lets Render build and run the Dockerfile from this repo.
+# Setup: Render dashboard -> New -> Blueprint -> pick this GitHub repo.
+services:
+  - type: web
+    name: rlic-gatepass-processor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # free plan has 512 MB RAM, too small for scanned PDFs
+    healthCheckPath: /healthz
+    autoDeploy: true         # redeploys when you push to GitHub
+    envVars:
+      - key: RLIC_MAX_FILES
+        value: "30"
+      - key: RLIC_MAX_FILE_MB
+        value: "20"
+      - key: RLIC_MAX_TOTAL_MB
+        value: "60"
+      - key: RLIC_MAX_TOTAL_PAGES
+        value: "300"
