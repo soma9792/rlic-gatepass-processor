@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local runs and test output: never commit processed documents
+uploads/
+processed/
+results/
+*.xlsx
+*.zip
+*.pdf
+
+# Test fixtures generate PDFs at test time; keep sample PDFs out of git
+tests/**/*.pdf
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

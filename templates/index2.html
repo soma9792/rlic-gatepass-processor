@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RLIC Gate Pass Processor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to right, #e0f7fa, #ffffff);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: #00796b;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        header h1 { margin: 0; font-size: 1.6rem; }
+
+        main {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 16px;
+        }
+
+        .upload-box {
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 100%;
+            max-width: 460px;
+            box-sizing: border-box;
+        }
+
+        .upload-box h2 {
+            margin-bottom: 12px;
+            color: #00796b;
+        }
+
+        .limits {
+            font-size: 13px;
+            color: #555;
+            text-align: left;
+            background: #f5fbfb;
+            border-left: 3px solid #00796b;
+            padding: 10px 12px;
+            margin: 0 0 18px 0;
+            line-height: 1.5;
+        }
+
+        .error {
+            background: #fdecea;
+            color: #b71c1c;
+            border: 1px solid #f5c2c0;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 16px;
+            text-align: left;
+        }
+
+        input[type="file"] {
+            margin-bottom: 20px;
+            width: 100%;
+        }
+
+        button {
+            background-color: #00796b;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover { background-color: #004d40; }
+        button:disabled { background-color: #80b5ae; cursor: wait; }
+
+        #status {
+            display: none;
+            margin-top: 14px;
+            color: #00796b;
+            font-size: 14px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 15px;
+            background-color: #f1f1f1;
+            font-size: 13px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>RLIC Gate Pass Processor</h1>
+    </header>
+
+    <main>
+        <div class="upload-box">
+            <h2>Upload PDF Files</h2>
+
+            <div class="limits">
+                Files are processed in memory and in a temporary folder that is deleted
+                when processing ends. Nothing is kept on the server after you download.
+                <br>Limits: PDF only, up to {{ max_files }} files, {{ max_file_mb }} MB per file,
+                {{ max_total_mb }} MB and {{ max_pages }} pages per batch.
+            </div>
+
+            {% if error %}
+            <div class="error" role="alert">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/process" enctype="multipart/form-data" id="uploadForm">
+                <input type="file" name="pdfs" accept="application/pdf,.pdf" multiple required id="pdfInput">
+                <br>
+                <button type="submit" id="submitBtn">Process and download ZIP</button>
+                <div id="status">Processing... scanned PDFs can take a few minutes.</div>
+            </form>
+        </div>
+    </main>
+
+    <footer>
+        Renames gate-pass PDFs by Staff No. and produces an Excel summary.
+    </footer>
+
+    <script>
+        (function () {
+            var form = document.getElementById("uploadForm");
+            var input = document.getElementById("pdfInput");
+            var btn = document.getElementById("submitBtn");
+            var status = document.getElementById("status");
+            var maxFiles = {{ max_files }};
+
+            form.addEventListener("submit", function (event) {
+                // Quick client-side checks. The server repeats them.
+                var files = Array.prototype.slice.call(input.files || []);
+                var bad = files.some(function (f) { return !/\.pdf$/i.test(f.name); });
+                if (files.length > maxFiles || bad) {
+                    event.preventDefault();
+                    alert(bad ? "Only PDF files are accepted." : "Too many files. The limit is " + maxFiles + ".");
+                    return;
+                }
+                btn.disabled = true;
+                status.style.display = "block";
+                // Re-enable after the download starts (or the page reloads on error).
+                setTimeout(function () { btn.disabled = false; status.style.display = "none"; }, 600000);
+            });
+        })();
+    </script>
+</body>
+</html>

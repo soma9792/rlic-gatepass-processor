@@ -1,0 +1,4 @@
+# Optional OCR for scanned PDFs (no text layer). Large: pulls in PyTorch.
+# In Docker, PyTorch is installed as the CPU build first (see Dockerfile).
+easyocr==1.7.2
+opencv-python-headless
